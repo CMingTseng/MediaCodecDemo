@@ -98,11 +98,11 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         } catch (IOException e) {
             e.printStackTrace();
         }
-        int mWidth = 640;
-        int mHeight = 480;
-        ByteBuffer buffer = ByteBuffer.wrap(csd0, offset, size);
+        int mWidth = 1080;
+        int mHeight = 800;
+//        ByteBuffer buffer = ByteBuffer.wrap(csd0, offset, size);
         MediaFormat mediaFormat = MediaFormat.createVideoFormat(VIDEO_FORMAT, mWidth, mHeight);
-        mediaFormat.setByteBuffer("csd-0", buffer);
+//        mediaFormat.setByteBuffer("csd-0", buffer);
         mDecoder.configure(mediaFormat, surface, null, 0);
         mDecoder.start();
     }
@@ -284,7 +284,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         if (mDecoder == null) {
             return;
         }
-        decodeMediaExtractorSample();
+//        decodeMediaExtractorSample();
 
 //        outputBuffer.position(bufferInfo.offset);
 //        outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
@@ -307,24 +307,24 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
 
 
+        // Ref http://blog.csdn.net/halleyzhang3/article/details/11473961
+        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
+        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
+        if (inputBufferIndex >= 0) {
+            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+            inputBuffer.clear();
+            inputBuffer.put(outputBuffer);
+            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
+                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
+            mCount++;
+        }
 
-//        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
-//        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
-//        if (inputBufferIndex >= 0) {
-//            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
-//            inputBuffer.clear();
-//            inputBuffer.put(outputBuffer);
-//            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
-//                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
-//            mCount++;
-//        }
-//
-//        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
-//        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
-//        while (outputBufferIndex >= 0) {
-//            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
-//            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
-//        }
+        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
+        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
+        while (outputBufferIndex >= 0) {
+            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
+            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
+        }
     }
 
     @Override
@@ -353,7 +353,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
-        createMediaExtractorDecoder(holder.getSurface());
+        createDecoder(holder.getSurface(), null, 0, 0);
     }
 
     @Override
