@@ -44,6 +44,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
     private Camera mCamera;
     private CameraPreview mPreview;
+    private SurfaceView mDecodePreview;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,10 +62,10 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         mPreview.setFrameListener(this);
         preview.addView(mPreview);
 
-        SurfaceView surfaceView = new SurfaceView(this);
-        surfaceView.getHolder().addCallback(this);
+        mDecodePreview = new SurfaceView(this);
+        mDecodePreview.getHolder().addCallback(this);
         preview = (FrameLayout) findViewById(R.id.decode_preview);
-        preview.addView(surfaceView);
+        preview.addView(mDecodePreview);
     }
 
     private void createEncoder() {
@@ -91,42 +92,18 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         mEncoder.start();
     }
 
-    private void createDecoder(Surface surface) {
-        mExtractor = new MediaExtractor();
+    private void createDecoder(Surface surface, byte[] csd0, int offset, int size) {
         try {
-            mExtractor.setDataSource(SAMPLE);
+            mDecoder = MediaCodec.createDecoderByType(VIDEO_FORMAT);
         } catch (IOException e) {
             e.printStackTrace();
         }
-
-        for (int i = 0; i < mExtractor.getTrackCount(); i++) {
-            MediaFormat format = mExtractor.getTrackFormat(i);
-            String mime = format.getString(MediaFormat.KEY_MIME);
-            if (mime.startsWith("video/")) {
-                mExtractor.selectTrack(i);
-
-                try {
-                    mDecoder = MediaCodec.createDecoderByType(mime);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-
-                mDecoder.configure(format, surface, null, 0);
-                break;
-            }
-        }
-
-//        try {
-//            mDecoder = MediaCodec.createDecoderByType(VIDEO_FORMAT);
-//        } catch (IOException e) {
-//            e.printStackTrace();
-//        }
-//        int mWidth = 640;
-//        int mHeight = 480;
-////        ByteBuffer buffer = ByteBuffer.wrap(csd0, offset, size);
-//        MediaFormat mediaFormat = MediaFormat.createVideoFormat(VIDEO_FORMAT, mWidth, mHeight);
-////        mediaFormat.setByteBuffer("csd-0", buffer);
-//        mDecoder.configure(mediaFormat, surface, null, 0);
+        int mWidth = 640;
+        int mHeight = 480;
+        ByteBuffer buffer = ByteBuffer.wrap(csd0, offset, size);
+        MediaFormat mediaFormat = MediaFormat.createVideoFormat(VIDEO_FORMAT, mWidth, mHeight);
+        mediaFormat.setByteBuffer("csd-0", buffer);
+        mDecoder.configure(mediaFormat, surface, null, 0);
         mDecoder.start();
     }
 
@@ -225,6 +202,33 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
                 mDecoder.queueInputBuffer(index, 0, size, presentationTimeUs, flags);
             }
         }
+    }
+
+    private void createMediaExtractorDecoder(Surface surface) {
+        mExtractor = new MediaExtractor();
+        try {
+            mExtractor.setDataSource(SAMPLE);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        for (int i = 0; i < mExtractor.getTrackCount(); i++) {
+            MediaFormat format = mExtractor.getTrackFormat(i);
+            String mime = format.getString(MediaFormat.KEY_MIME);
+            if (mime.startsWith("video/")) {
+                mExtractor.selectTrack(i);
+
+                try {
+                    mDecoder = MediaCodec.createDecoderByType(mime);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                mDecoder.configure(format, surface, null, 0);
+                break;
+            }
+        }
+        mDecoder.start();
     }
 
     private void decodeMediaExtractorSample() {
@@ -349,15 +353,11 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
-        createDecoder(holder.getSurface());
+        createMediaExtractorDecoder(holder.getSurface());
     }
 
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-//        if (mPlayer == null) {
-//            mPlayer = new PlayerThread(holder.getSurface());
-//            mPlayer.start();
-//        }
     }
 
     @Override
