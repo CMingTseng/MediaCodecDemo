@@ -7,17 +7,25 @@ import android.graphics.ImageFormat;
 import android.hardware.Camera;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
+import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.util.Log;
 import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.widget.FrameLayout;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-public class CameraActivity extends Activity implements CameraPreview.FrameListener {
+public class CameraActivity extends Activity implements CameraPreview.FrameListener,
+        SurfaceHolder.Callback {
     private static final String TAG = "CameraActivity";
+
+    private static final String SAMPLE = Environment.getExternalStorageDirectory() + "/video.mp4";
 
     static final int OUTPUT_WIDTH = 1280;
     static final int OUTPUT_HEIGHT = 960;
@@ -29,6 +37,10 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
     private MediaCodec mEncoder;
     private MediaCodec mDecoder;
+    private MediaExtractor mExtractor;
+    private int mCount = 1;
+    private byte[] mDecodeBuffer = new byte[0];
+    private long mTimeoutUs = 10000l;
 
     private Camera mCamera;
     private CameraPreview mPreview;
@@ -38,7 +50,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_camera);
 
-        createCodec();
+        createEncoder();
 
         FrameLayout preview = (FrameLayout) findViewById(R.id.camera_preview);
         // Create an instance of Camera
@@ -48,9 +60,14 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         mPreview = new CameraPreview(this, mCamera);
         mPreview.setFrameListener(this);
         preview.addView(mPreview);
+
+        SurfaceView surfaceView = new SurfaceView(this);
+        surfaceView.getHolder().addCallback(this);
+        preview = (FrameLayout) findViewById(R.id.decode_preview);
+        preview.addView(surfaceView);
     }
 
-    private void createCodec() {
+    private void createEncoder() {
         // video output dimension
         int mWidth = OUTPUT_WIDTH;
         int mHeight = OUTPUT_HEIGHT;
@@ -72,6 +89,45 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         mEncoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
 
         mEncoder.start();
+    }
+
+    private void createDecoder(Surface surface) {
+        mExtractor = new MediaExtractor();
+        try {
+            mExtractor.setDataSource(SAMPLE);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        for (int i = 0; i < mExtractor.getTrackCount(); i++) {
+            MediaFormat format = mExtractor.getTrackFormat(i);
+            String mime = format.getString(MediaFormat.KEY_MIME);
+            if (mime.startsWith("video/")) {
+                mExtractor.selectTrack(i);
+
+                try {
+                    mDecoder = MediaCodec.createDecoderByType(mime);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                mDecoder.configure(format, surface, null, 0);
+                break;
+            }
+        }
+
+//        try {
+//            mDecoder = MediaCodec.createDecoderByType(VIDEO_FORMAT);
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+//        int mWidth = 640;
+//        int mHeight = 480;
+////        ByteBuffer buffer = ByteBuffer.wrap(csd0, offset, size);
+//        MediaFormat mediaFormat = MediaFormat.createVideoFormat(VIDEO_FORMAT, mWidth, mHeight);
+////        mediaFormat.setByteBuffer("csd-0", buffer);
+//        mDecoder.configure(mediaFormat, surface, null, 0);
+        mDecoder.start();
     }
 
     /** Check if this device has a camera */
@@ -153,9 +209,118 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         mCamera.release();
     }
 
+    public void decodeSample(byte[] data, int offset, int size, long presentationTimeUs, int flags) {
+        int index = mDecoder.dequeueInputBuffer(mTimeoutUs);
+        if (index >= 0) {
+            ByteBuffer buffer;
+            // since API 21 we have new API to use
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+                buffer = mDecoder.getInputBuffers()[index];
+                buffer.clear();
+            } else {
+                buffer = mDecoder.getInputBuffer(index);
+            }
+            if (buffer != null) {
+                buffer.put(data, offset, size);
+                mDecoder.queueInputBuffer(index, 0, size, presentationTimeUs, flags);
+            }
+        }
+    }
+
+    private void decodeMediaExtractorSample() {
+        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
+        ByteBuffer[] outputBuffers = mDecoder.getOutputBuffers();
+        MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+        boolean isEOS = false;
+        long startMs = System.currentTimeMillis();
+
+        if (!isEOS) {
+            int inIndex = mDecoder.dequeueInputBuffer(10000);
+            if (inIndex >= 0) {
+                ByteBuffer buffer = inputBuffers[inIndex];
+                int sampleSize = mExtractor.readSampleData(buffer, 0);
+                if (sampleSize < 0) {
+                    // We shouldn't stop the playback at this point, just pass the EOS
+                    // flag to decoder, we will get it again from the
+                    // dequeueOutputBuffer
+                    Log.i(TAG, "InputBuffer BUFFER_FLAG_END_OF_STREAM");
+                    mDecoder.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                    isEOS = true;
+                } else {
+                    mDecoder.queueInputBuffer(inIndex, 0, sampleSize, mExtractor.getSampleTime(), 0);
+                    mExtractor.advance();
+                }
+            }
+        }
+
+        int outIndex = mDecoder.dequeueOutputBuffer(info, 10000);
+        if (outIndex >= 0) {
+            ByteBuffer buffer = outputBuffers[outIndex];
+            Log.i(TAG, "We can't use this buffer but render it due to the API limit, " + buffer);
+            mDecoder.releaseOutputBuffer(outIndex, true);
+        }
+
+        // All decoded frames have been rendered, we can stop playing now
+        if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+            Log.i(TAG, "OutputBuffer BUFFER_FLAG_END_OF_STREAM");
+        }
+
+        if (isEOS) {
+            mExtractor.release();
+            mExtractor = new MediaExtractor();
+            try {
+                mExtractor.setDataSource(SAMPLE);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
     private void writeEncodedData(ByteBuffer outputBuffer, MediaCodec.BufferInfo bufferInfo) {
-//        if (frameListener != null)
-//            frameListener.onFrame(outputBuffer, 0, length, flag);
+        if (mDecoder == null) {
+            return;
+        }
+        decodeMediaExtractorSample();
+
+//        outputBuffer.position(bufferInfo.offset);
+//        outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
+//
+//        // Here we could have just used ByteBuffer, but in real life case we might need to
+//        // send sample over network, etc. This requires byte[]
+//        if (mDecodeBuffer.length < bufferInfo.size) {
+//            mDecodeBuffer = new byte[bufferInfo.size];
+//        }
+//        outputBuffer.get(mDecodeBuffer, 0, bufferInfo.size);
+//
+//        if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
+//            // this is the first and only config sample, which contains information about codec
+//            // like H.264, that let's configure the decoder
+//            createDecoder(mDecodePreview.getHolder().getSurface(), mDecodeBuffer, 0, bufferInfo.size);
+//        } else {
+//            decodeSample(mDecodeBuffer, 0, bufferInfo.size, bufferInfo.presentationTimeUs,
+//                    bufferInfo.flags);
+//        }
+
+
+
+
+//        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
+//        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
+//        if (inputBufferIndex >= 0) {
+//            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+//            inputBuffer.clear();
+//            inputBuffer.put(outputBuffer);
+//            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
+//                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
+//            mCount++;
+//        }
+//
+//        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
+//        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
+//        while (outputBufferIndex >= 0) {
+//            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
+//            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
+//        }
     }
 
     @Override
@@ -181,4 +346,23 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         }
         Log.i(TAG, "onPreviewFrame, data length = " + length);
     }
+
+    @Override
+    public void surfaceCreated(SurfaceHolder holder) {
+        createDecoder(holder.getSurface());
+    }
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+//        if (mPlayer == null) {
+//            mPlayer = new PlayerThread(holder.getSurface());
+//            mPlayer.start();
+//        }
+    }
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+
+    }
+
 }

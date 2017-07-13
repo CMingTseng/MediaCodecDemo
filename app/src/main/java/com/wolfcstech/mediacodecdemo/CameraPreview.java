@@ -16,9 +16,10 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
         Camera.PreviewCallback {
     private static final String TAG = "CameraPreview";
 
+    private FrameListener mFrameListener;
+
     private SurfaceHolder mHolder;
     private Camera mCamera;
-    private FrameListener mFrameListener;
     private byte[] mPreviewBuffer = new byte[1280 * 960 * 3 / 2];
 
     public CameraPreview(Context context, Camera camera) {
@@ -37,12 +38,12 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
         // The Surface has been created, now tell the camera where to draw the preview.
         try {
             mCamera.setPreviewDisplay(holder);
-            mCamera.addCallbackBuffer(mPreviewBuffer);
-            mCamera.setPreviewCallbackWithBuffer(this);
-            mCamera.startPreview();
         } catch (IOException e) {
-            Log.d(TAG, "Error setting camera preview: " + e.getMessage());
+            e.printStackTrace();
         }
+        mCamera.addCallbackBuffer(mPreviewBuffer);
+        mCamera.setPreviewCallbackWithBuffer(this);
+        mCamera.startPreview();
     }
 
     public void surfaceDestroyed(SurfaceHolder holder) {
@@ -70,11 +71,10 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
 
         // start preview with new settings
         try {
-            mCamera.setPreviewDisplay(mHolder);
+            mCamera.setPreviewDisplay(holder);
             mCamera.addCallbackBuffer(mPreviewBuffer);
             mCamera.setPreviewCallbackWithBuffer(this);
             mCamera.startPreview();
-
         } catch (Exception e){
             Log.d(TAG, "Error starting camera preview: " + e.getMessage());
         }
