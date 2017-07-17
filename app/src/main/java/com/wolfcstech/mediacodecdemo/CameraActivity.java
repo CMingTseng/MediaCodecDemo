@@ -7,8 +7,10 @@ import android.graphics.ImageFormat;
 import android.hardware.Camera;
 import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
+import android.media.MediaDataSource;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -16,16 +18,25 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 import android.widget.FrameLayout;
 
+import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 public class CameraActivity extends Activity implements CameraPreview.FrameListener,
-        SurfaceHolder.Callback {
+        SurfaceHolder.Callback, View.OnClickListener {
     private static final String TAG = "CameraActivity";
 
-    private static final String SAMPLE = Environment.getExternalStorageDirectory() + "/video.mp4";
+    private static final String SAMPLE = Environment.getExternalStorageDirectory() + "/screen.mp4";
 
     static final int OUTPUT_WIDTH = 1280;
     static final int OUTPUT_HEIGHT = 960;
@@ -45,6 +56,8 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
     private Camera mCamera;
     private CameraPreview mPreview;
     private SurfaceView mDecodePreview;
+
+    private StreamRequestTask mStreamRequestTask;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,6 +79,8 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         mDecodePreview.getHolder().addCallback(this);
         preview = (FrameLayout) findViewById(R.id.decode_preview);
         preview.addView(mDecodePreview);
+
+        findViewById(R.id.button_capture).setOnClickListener(this);
     }
 
     private void createEncoder() {
@@ -212,9 +227,11 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
             e.printStackTrace();
         }
 
+        Log.i(TAG, "createMediaExtractorDecoder TrackCount = " + mExtractor.getTrackCount());
         for (int i = 0; i < mExtractor.getTrackCount(); i++) {
             MediaFormat format = mExtractor.getTrackFormat(i);
             String mime = format.getString(MediaFormat.KEY_MIME);
+            Log.i(TAG, "createMediaExtractorDecoder mime = " + mime);
             if (mime.startsWith("video/")) {
                 mExtractor.selectTrack(i);
 
@@ -228,7 +245,38 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
                 break;
             }
         }
+        Log.i(TAG, "createMediaExtractorDecoder decoder start " + mDecoder);
         mDecoder.start();
+    }
+
+    private void createNetworkMediaExtractorDecoder(Surface surface, MediaDataSource dataSource) {
+        mExtractor = new MediaExtractor();
+        try {
+            mExtractor.setDataSource(dataSource);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        MediaCodec decoder = null;
+        for (int i = 0; i < mExtractor.getTrackCount(); i++) {
+            MediaFormat format = mExtractor.getTrackFormat(i);
+            String mime = format.getString(MediaFormat.KEY_MIME);
+            if (mime.startsWith("video/")) {
+                mExtractor.selectTrack(i);
+
+                try {
+                    decoder = MediaCodec.createDecoderByType(mime);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+
+                decoder.configure(format, mDecodePreview.getHolder().getSurface(), null, 0);
+                break;
+            }
+        }
+        if (decoder != null) {
+            decoder.start();
+        }
+        mDecoder = decoder;
     }
 
     private void decodeMediaExtractorSample() {
@@ -260,7 +308,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         int outIndex = mDecoder.dequeueOutputBuffer(info, 10000);
         if (outIndex >= 0) {
             ByteBuffer buffer = outputBuffers[outIndex];
-            Log.i(TAG, "We can't use this buffer but render it due to the API limit, " + buffer);
+//            Log.i(TAG, "We can't use this buffer but render it due to the API limit, " + buffer);
             mDecoder.releaseOutputBuffer(outIndex, true);
         }
 
@@ -284,7 +332,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         if (mDecoder == null) {
             return;
         }
-//        decodeMediaExtractorSample();
+        decodeMediaExtractorSample();
 
 //        outputBuffer.position(bufferInfo.offset);
 //        outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
@@ -308,23 +356,23 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
 
         // Ref http://blog.csdn.net/halleyzhang3/article/details/11473961
-        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
-        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
-        if (inputBufferIndex >= 0) {
-            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
-            inputBuffer.clear();
-            inputBuffer.put(outputBuffer);
-            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
-                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
-            mCount++;
-        }
-
-        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
-        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
-        while (outputBufferIndex >= 0) {
-            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
-            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
-        }
+//        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
+//        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
+//        if (inputBufferIndex >= 0) {
+//            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+//            inputBuffer.clear();
+//            inputBuffer.put(outputBuffer);
+//            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
+//                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
+//            mCount++;
+//        }
+//
+//        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
+//        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
+//        while (outputBufferIndex >= 0) {
+//            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
+//            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
+//        }
     }
 
     @Override
@@ -348,12 +396,17 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
             mEncoder.releaseOutputBuffer(outputBufferIndex, false);
             outputBufferIndex = mEncoder.dequeueOutputBuffer(bufferInfo, 0);
         }
-        Log.i(TAG, "onPreviewFrame, data length = " + length);
     }
 
     @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        createDecoder(holder.getSurface(), null, 0, 0);
+    public void surfaceCreated(final SurfaceHolder holder) {
+//        createDecoder(holder.getSurface(), null, 0, 0);
+//        createMediaExtractorDecoder(holder.getSurface());
+
+
+        final NetworkMediaDataSource dataSource = new NetworkMediaDataSource();
+        mStreamRequestTask = new StreamRequestTask(dataSource);
+        mStreamRequestTask.execute();
     }
 
     @Override
@@ -365,4 +418,153 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
     }
 
+    @Override
+    public void onClick(View v) {
+        if (mStreamRequestTask != null) {
+            mStreamRequestTask.stopStreamReceive();
+            mStreamRequestTask = null;
+
+            if (mExtractor != null) {
+                mExtractor.release();
+                mExtractor = null;
+            }
+            if (mDecoder != null) {
+                mDecoder.stop();
+                mDecoder.release();
+                mDecoder = null;
+            }
+        } else {
+            NetworkMediaDataSource dataSource = new NetworkMediaDataSource();
+            mStreamRequestTask = new StreamRequestTask(dataSource);
+            mStreamRequestTask.execute();
+            createNetworkMediaExtractorDecoder(mDecodePreview.getHolder().getSurface(), dataSource);
+        }
+    }
+
+    private class StreamRequestTask extends AsyncTask<Void, Void, Void> {
+        private StreamReceiver.StreamDataReceivedListener mDataReceivedListener;
+        private StreamReceiver mStreamReceiver;
+
+        public StreamRequestTask(StreamReceiver.StreamDataReceivedListener dataReceivedListener) {
+            mDataReceivedListener = dataReceivedListener;
+            mStreamReceiver = new StreamReceiver();
+            mStreamReceiver.setDataReceivedListener(mDataReceivedListener);
+        }
+
+        @Override
+        protected Void doInBackground(Void... params) {
+            mStreamReceiver.requestStreamData("10.240.252.17", 18960);
+            return null;
+        }
+
+        public void stopStreamReceive() {
+            mStreamReceiver.stop();
+        }
+    }
+
+    private class NetworkMediaDataSource extends MediaDataSource implements
+            StreamReceiver.StreamDataReceivedListener {
+        private long dataTotalLen = 0;
+
+        private MessageDigest mMD5Digest;
+
+
+        private byte[] mMediaData;
+
+        private NetworkMediaDataSource() {
+            mMediaData = new byte[5000000];
+
+            try {
+                mMD5Digest = MessageDigest.getInstance("MD5");
+
+            } catch (NoSuchAlgorithmException e) {
+            }
+        }
+
+        @Override
+        public int readAt(long position, byte[] buffer, int offset, int size) throws IOException {
+            int readLen;
+            if (position >= getSize()) {
+                readLen = -1;
+            } else if (position < dataTotalLen && position + size >= dataTotalLen) {
+                readLen = (int) (dataTotalLen - position);
+            } else {
+                readLen = size;
+            }
+            if (readLen > 0) {
+                System.arraycopy(mMediaData, (int) position, buffer, offset, readLen);
+            }
+//            Log.i(TAG, "Packet read length = " + dataTotalLen + " position = " + position
+//                    + " size " + size + " readLen = " + readLen);
+            return readLen;
+        }
+
+        private char[] sHexChar = { '0', '1', '2', '3', '4', '5', '6', '7',
+                '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+
+        public String toHexString(byte[] b) {
+            StringBuilder sb = new StringBuilder(b.length * 2);
+            for (int i = 0; i < b.length; i++) {
+                sb.append(sHexChar[(b[i] & 0xf0) >>> 4]);
+                sb.append(sHexChar[b[i] & 0x0f]);
+            }
+            return sb.toString();
+        }
+
+        @Override
+        public long getSize() throws IOException {
+            return 1967007;
+        }
+
+        @Override
+        public void close() throws IOException {
+
+        }
+
+        private void testRead() {
+            byte[] buffer = new byte[4096];
+            int pos = 0;
+            int readlen;
+            MessageDigest mReadMD5Digest = null;
+            try {
+                mReadMD5Digest = MessageDigest.getInstance("MD5");
+            } catch (NoSuchAlgorithmException e) {
+            }
+            try {
+                while ((readlen = readAt(pos, buffer, 0, 4096)) >= 0) {
+                    mReadMD5Digest.update(buffer, 0, readlen);
+                    pos += readlen;
+                }
+                byte[] digest = mReadMD5Digest.digest();
+                String md5 = toHexString(digest);
+                Log.i(TAG, "Read data md5 = " + md5);
+            } catch (IOException e) {
+            }
+
+        }
+
+        @Override
+        public void onStreamDataReceived(int index, byte[] data, int offset, int size) {
+            System.arraycopy(data, offset, mMediaData, (int) dataTotalLen, size);
+            dataTotalLen += size;
+
+            if (dataTotalLen % 700000 == 0) {
+                Log.i(TAG, "Recv packet length = " + dataTotalLen + " index = " + index);
+            }
+            try {
+                if (dataTotalLen >= getSize()) {
+                    // || size != 1400
+                    Log.i(TAG, "Recv packet length = " + dataTotalLen + " index = " + index);
+                    mMD5Digest.update(mMediaData, 0, (int) dataTotalLen);
+                    byte[] digest = mMD5Digest.digest();
+                    String md5 = toHexString(digest);
+                    Log.i(TAG, "Recv data md5 = " + md5);
+
+                    createNetworkMediaExtractorDecoder(mDecodePreview.getHolder().getSurface(), this);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
 }

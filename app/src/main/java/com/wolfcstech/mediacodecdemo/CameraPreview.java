@@ -86,7 +86,7 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
 
     @Override
     public void onPreviewFrame(byte[] data, Camera camera) {
-        Log.i(TAG, "onPreviewFrame, data length = " + data.length);
+//        Log.i(TAG, "onPreviewFrame, data length = " + data.length);
         camera.getParameters().getPreviewFormat();
         if (mFrameListener != null) {
             mFrameListener.onFrame(data, 0, data.length, 0);
