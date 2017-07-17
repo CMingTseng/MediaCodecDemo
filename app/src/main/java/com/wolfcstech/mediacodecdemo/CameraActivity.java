@@ -21,16 +21,10 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.widget.FrameLayout;
 
-import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.concurrent.BlockingDeque;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
 public class CameraActivity extends Activity implements CameraPreview.FrameListener,
         SurfaceHolder.Callback, View.OnClickListener {
@@ -50,7 +44,6 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
     private MediaCodec mDecoder;
     private MediaExtractor mExtractor;
     private int mCount = 1;
-    private byte[] mDecodeBuffer = new byte[0];
     private long mTimeoutUs = 10000l;
 
     private Camera mCamera;
@@ -107,7 +100,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         mEncoder.start();
     }
 
-    private void createDecoder(Surface surface, byte[] csd0, int offset, int size) {
+    private void createDecoder(Surface surface) {
         try {
             mDecoder = MediaCodec.createDecoderByType(VIDEO_FORMAT);
         } catch (IOException e) {
@@ -115,9 +108,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         }
         int mWidth = 1080;
         int mHeight = 800;
-//        ByteBuffer buffer = ByteBuffer.wrap(csd0, offset, size);
         MediaFormat mediaFormat = MediaFormat.createVideoFormat(VIDEO_FORMAT, mWidth, mHeight);
-//        mediaFormat.setByteBuffer("csd-0", buffer);
         mDecoder.configure(mediaFormat, surface, null, 0);
         mDecoder.start();
     }
@@ -245,7 +236,6 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
                 break;
             }
         }
-        Log.i(TAG, "createMediaExtractorDecoder decoder start " + mDecoder);
         mDecoder.start();
     }
 
@@ -332,47 +322,26 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         if (mDecoder == null) {
             return;
         }
-        decodeMediaExtractorSample();
-
-//        outputBuffer.position(bufferInfo.offset);
-//        outputBuffer.limit(bufferInfo.offset + bufferInfo.size);
-//
-//        // Here we could have just used ByteBuffer, but in real life case we might need to
-//        // send sample over network, etc. This requires byte[]
-//        if (mDecodeBuffer.length < bufferInfo.size) {
-//            mDecodeBuffer = new byte[bufferInfo.size];
-//        }
-//        outputBuffer.get(mDecodeBuffer, 0, bufferInfo.size);
-//
-//        if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == MediaCodec.BUFFER_FLAG_CODEC_CONFIG) {
-//            // this is the first and only config sample, which contains information about codec
-//            // like H.264, that let's configure the decoder
-//            createDecoder(mDecodePreview.getHolder().getSurface(), mDecodeBuffer, 0, bufferInfo.size);
-//        } else {
-//            decodeSample(mDecodeBuffer, 0, bufferInfo.size, bufferInfo.presentationTimeUs,
-//                    bufferInfo.flags);
-//        }
-
-
+//        decodeMediaExtractorSample();
 
         // Ref http://blog.csdn.net/halleyzhang3/article/details/11473961
-//        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
-//        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
-//        if (inputBufferIndex >= 0) {
-//            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
-//            inputBuffer.clear();
-//            inputBuffer.put(outputBuffer);
-//            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
-//                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
-//            mCount++;
-//        }
-//
-//        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
-//        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
-//        while (outputBufferIndex >= 0) {
-//            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
-//            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
-//        }
+        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
+        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
+        if (inputBufferIndex >= 0) {
+            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+            inputBuffer.clear();
+            inputBuffer.put(outputBuffer);
+            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
+                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
+            mCount++;
+        }
+
+        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
+        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
+        while (outputBufferIndex >= 0) {
+            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
+            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
+        }
     }
 
     @Override
@@ -400,13 +369,13 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
     @Override
     public void surfaceCreated(final SurfaceHolder holder) {
-//        createDecoder(holder.getSurface(), null, 0, 0);
+        createDecoder(holder.getSurface());
 //        createMediaExtractorDecoder(holder.getSurface());
 
 
-        final NetworkMediaDataSource dataSource = new NetworkMediaDataSource();
-        mStreamRequestTask = new StreamRequestTask(dataSource);
-        mStreamRequestTask.execute();
+//        final NetworkMediaDataSource dataSource = new NetworkMediaDataSource();
+//        mStreamRequestTask = new StreamRequestTask(dataSource);
+//        mStreamRequestTask.execute();
     }
 
     @Override
