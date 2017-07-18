@@ -55,7 +55,6 @@ public class StreamReceiver {
 
         DatagramPacket sendPacket = new DatagramPacket(sendBuf, sendBuf.length, addr, port);
         try {
-//            Log.i(TAG, "To send packet");
             client.send(sendPacket);
         } catch (IOException e) {
             e.printStackTrace();
@@ -63,7 +62,6 @@ public class StreamReceiver {
 
         DatagramPacket recvPacket = new DatagramPacket(mRecvBuf, mRecvBuf.length);
         while (!mStop) {
-//            Log.i(TAG, "To recveive packet.");
             try {
                 client.receive(recvPacket);
                 if (mDataReceivedListener != null) {
@@ -87,13 +85,6 @@ public class StreamReceiver {
         bb.asIntBuffer();
         int index = bb.getInt();
 
-//        int index = data[offset] & 0xff;
-//        index = index << 8 + (data[offset + 1] & 0xff);
-//        index = index << 8 + (data[offset + 2] & 0xff);
-//        index = index << 8 + (data[offset + 3] & 0xff);
-//        Log.i(TAG, "data0 " + data[offset + 0] + " data1 " + data[offset + 1] + " data2 "
-//                + data[offset + 2] + " data3 " + data[offset + 3]);
-//        Log.i(TAG, "index = " + index);
         return index;
     }
 
