@@ -27,7 +27,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 public class CameraActivity extends Activity implements CameraPreview.FrameListener,
-        SurfaceHolder.Callback, View.OnClickListener {
+        SurfaceHolder.Callback, View.OnClickListener, TCPStreamReceiver.StreamReceivedListener {
     private static final String TAG = "CameraActivity";
 
     private static final String SAMPLE = Environment.getExternalStorageDirectory() + "/screen.mp4";
@@ -325,23 +325,23 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 //        decodeMediaExtractorSample();
 
         // Ref http://blog.csdn.net/halleyzhang3/article/details/11473961
-        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
-        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
-        if (inputBufferIndex >= 0) {
-            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
-            inputBuffer.clear();
-            inputBuffer.put(outputBuffer);
-            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
-                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
-            mCount++;
-        }
-
-        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
-        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
-        while (outputBufferIndex >= 0) {
-            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
-            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
-        }
+//        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
+//        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
+//        if (inputBufferIndex >= 0) {
+//            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+//            inputBuffer.clear();
+//            inputBuffer.put(outputBuffer);
+//            mDecoder.queueInputBuffer(inputBufferIndex, 0, bufferInfo.size,
+//                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
+//            mCount++;
+//        }
+//
+//        MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
+//        int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo,0);
+//        while (outputBufferIndex >= 0) {
+//            mDecoder.releaseOutputBuffer(outputBufferIndex, true);
+//            outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
+//        }
     }
 
     @Override
@@ -376,6 +376,10 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 //        final NetworkMediaDataSource dataSource = new NetworkMediaDataSource();
 //        mStreamRequestTask = new StreamRequestTask(dataSource);
 //        mStreamRequestTask.execute();
+
+
+        TCPStreamRequestTask task = new TCPStreamRequestTask();
+        task.execute();
     }
 
     @Override
@@ -407,6 +411,54 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
             mStreamRequestTask = new StreamRequestTask(dataSource);
             mStreamRequestTask.execute();
             createNetworkMediaExtractorDecoder(mDecodePreview.getHolder().getSurface(), dataSource);
+        }
+    }
+
+    @Override
+    public void onDataReceived(ByteBuffer byteBuffer) {
+        int size = byteBuffer.limit() - byteBuffer.position();
+        Log.i(TAG, "Receive stream data from video server " + size + " bytes this time");
+        ByteBuffer[] inputBuffers = mDecoder.getInputBuffers();
+        int inputBufferIndex = mDecoder.dequeueInputBuffer(-1);
+        if (inputBufferIndex >= 0) {
+            ByteBuffer inputBuffer = inputBuffers[inputBufferIndex];
+            inputBuffer.clear();
+            inputBuffer.put(byteBuffer);
+            mDecoder.queueInputBuffer(inputBufferIndex, 0, size,
+                    mCount * 1000000 / VIDEO_FRAME_PER_SECOND, 0);
+            mCount++;
+        }
+
+        mDecodePreview.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                MediaCodec.BufferInfo decodeBufferInfo = new MediaCodec.BufferInfo();
+                int outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
+                while (outputBufferIndex >= 0) {
+                    mDecoder.releaseOutputBuffer(outputBufferIndex, true);
+                    outputBufferIndex = mDecoder.dequeueOutputBuffer(decodeBufferInfo, 0);
+                }
+            }
+        }, 50);
+    }
+
+    private class TCPStreamRequestTask extends AsyncTask<Void, Void, Void> {
+        private TCPStreamReceiver mStreamReceiver;
+
+        public TCPStreamRequestTask() {
+            mStreamReceiver = new TCPStreamReceiver();
+            mStreamReceiver.setDataReceivedListener(CameraActivity.this);
+        }
+
+        @Override
+        protected Void doInBackground(Void... params) {
+//            mStreamReceiver.requestStreamData("10.240.252.17", 18960);
+            mStreamReceiver.requestStreamData("10.242.24.174", 18960);
+            return null;
+        }
+
+        public void stopStreamReceive() {
+            mStreamReceiver.stop();
         }
     }
 
