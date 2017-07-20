@@ -136,9 +136,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
                     c = Camera.open(i);
                 }
             }
-
-            setCameraDispalyOrientation(c, cameraInfo);
-
+            setCameraDisplayOrientation(c, cameraInfo);
             Camera.Parameters parameters = c.getParameters();
 
 //            List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
@@ -154,8 +152,6 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
             parameters.setPictureSize(camWidth, camHeight);
             parameters.setPreviewSize(camWidth, camHeight);
 
-            c.setDisplayOrientation(Surface.ROTATION_0);
-
             c.setParameters(parameters);
         } catch (Exception e) {
             // Camera is not available (in use or does not exist)
@@ -163,28 +159,27 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         return c; // returns null if camera is unavailable
     }
 
-    private void setCameraDispalyOrientation(Camera camera, Camera.CameraInfo cameraInfo) {
-        int rotation = getWindowManager().getDefaultDisplay().getRotation();
-
-        int degree = 0;
+    public void setCameraDisplayOrientation(Camera camera, Camera.CameraInfo cameraInfo) {
+        int rotation = getWindowManager().getDefaultDisplay()
+                .getRotation();
+        int degrees = 0;
         switch (rotation) {
-            case Surface.ROTATION_0:
-                degree = 0;
-                break;
-            case Surface.ROTATION_90:
-                degree = 90;
-                break;
-            case Surface.ROTATION_180:
-                degree = 180;
-                break;
-            case Surface.ROTATION_270:
-                degree = 270;
-                break;
+            case Surface.ROTATION_0: degrees = 0; break;
+            case Surface.ROTATION_90: degrees = 90; break;
+            case Surface.ROTATION_180: degrees = 180; break;
+            case Surface.ROTATION_270: degrees = 270; break;
         }
-        int result = (cameraInfo.orientation - degree + 360) % 360;
-        result = (360 - result) % 360;
+
+        int result;
+        if (cameraInfo.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            result = (cameraInfo.orientation + degrees) % 360;
+            result = (360 - result) % 360;  // compensate the mirror
+        } else {  // back-facing
+            result = (cameraInfo.orientation - degrees + 360) % 360;
+        }
         camera.setDisplayOrientation(result);
     }
+
 
     @Override
     protected void onDestroy() {
