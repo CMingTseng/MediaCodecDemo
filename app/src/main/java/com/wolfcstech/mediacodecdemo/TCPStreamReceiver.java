@@ -4,6 +4,7 @@ import android.system.ErrnoException;
 import android.system.OsConstants;
 import android.util.Log;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -42,7 +43,7 @@ public class TCPStreamReceiver {
         mStop = true;
     }
 
-    private void connectAndRequestStream(SocketAddress socketAddress) throws IOException {
+    private void connectAndRequestVideo(SocketAddress socketAddress) throws IOException {
         Socket client = null;
         try {
             client = new Socket();
@@ -53,12 +54,31 @@ public class TCPStreamReceiver {
 
         client.connect(socketAddress);
 
-        String sendStr = "Hello! I'm Client";
-        byte[] sendBuf = sendStr.getBytes();
+        Controlmsg.VideoRoleRegistration.Builder videoRoleRegistrationBuild = Controlmsg.VideoRoleRegistration.newBuilder();
+        videoRoleRegistrationBuild.setRole(Message.VideoRoleConsumer);
+        videoRoleRegistrationBuild.setVideoStreamId("1234567890");
+        Controlmsg.VideoRoleRegistration videoRoleRegistration = videoRoleRegistrationBuild.build();
+
+        Message.MessageHdr msgheader = new Message.MessageHdr();
+        msgheader.message_type = Message.MessageTypeVideoRoleRegistraction;
+        msgheader.message_data_length = videoRoleRegistration.getSerializedSize();
+
+        ByteBuffer sendbuffer = ByteBuffer.allocate(16);
+        sendbuffer.order(ByteOrder.BIG_ENDIAN);
+        sendbuffer.putInt(msgheader.message_type);
+        sendbuffer.putInt(msgheader.message_data_length);
+
+        sendbuffer.flip();
+        byte[] sendBuf = new byte[8];
+        sendbuffer.get(sendBuf);
 
         OutputStream outputStream = null;
         InputStream inputStream = null;
+
         outputStream = client.getOutputStream();
+        outputStream.write(sendBuf);
+
+        sendBuf = videoRoleRegistration.toByteArray();
         outputStream.write(sendBuf);
 
         inputStream = client.getInputStream();
@@ -101,8 +121,105 @@ public class TCPStreamReceiver {
                         remainBytes = false;
                     }
                 }
-//                    String recvStr = new String(mRecvBuf, 0, readcount);
-//                    Log.i(TAG, "收到:" + recvStr);
+            }
+        } finally {
+            if (outputStream != null) {
+                try {
+                    outputStream.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            try {
+                client.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    private void requestVideoData(String videoServerAddr, int serverPort) {
+        try {
+            InetAddress addr = InetAddress.getByName(videoServerAddr);
+            final SocketAddress socketAddress = new InetSocketAddress(addr, serverPort);
+            new Thread() {
+                @Override
+                public void run() {
+                    while (!mStop) {
+                        try {
+                            mTotalRecvBytes = 0;
+                            connectAndRequestVideo(socketAddress);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                            if (!recover(e)) {
+                                mStop = true;
+                            }
+                        }
+                    }
+                }
+            }.start();
+        } catch (UnknownHostException e) {
+        }
+    }
+
+    private void connectAndRequestStream(SocketAddress socketAddress) throws IOException {
+        Socket client = null;
+        try {
+            client = new Socket();
+            client.setSoTimeout(0);
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
+
+        client.connect(socketAddress);
+
+        Message.MessageHdr msgheader = new Message.MessageHdr();
+        msgheader.message_type = Message.MessageTypeDeviceRegistraction;
+        msgheader.message_data_length = 0;
+
+        ByteBuffer sendbuffer = ByteBuffer.allocate(16);
+        sendbuffer.order(ByteOrder.BIG_ENDIAN);
+        sendbuffer.putInt(msgheader.message_type);
+        sendbuffer.putInt(msgheader.message_data_length);
+
+        sendbuffer.flip();
+        byte[] sendBuf = new byte[8];
+        sendbuffer.get(sendBuf);
+
+        OutputStream outputStream = null;
+        InputStream inputStream = null;
+
+        outputStream = client.getOutputStream();
+        outputStream.write(sendBuf);
+
+        inputStream = client.getInputStream();
+
+        byte[] msgRecvBuf = new byte[4096];
+
+        try {
+            while (!mStop) {
+                int readcount = inputStream.read(msgRecvBuf, 0, 8);
+                ByteBuffer bb = ByteBuffer.wrap(msgRecvBuf, 0, 8);
+                bb.order(ByteOrder.BIG_ENDIAN);
+
+                msgheader.message_type = bb.getInt();
+                msgheader.message_data_length = bb.getInt();
+
+                if (msgheader.message_type == Message.MessageTypeVideoServerInfo) {
+                    readcount = inputStream.read(msgRecvBuf, 0, msgheader.message_data_length);
+                    ByteArrayInputStream bais = new ByteArrayInputStream(msgRecvBuf, 0, msgheader.message_data_length);
+                    Controlmsg.VideoServerInfo videoServerInfo = Controlmsg.VideoServerInfo.parseFrom(bais);
+                    String videoServerAddr = videoServerInfo.getServeraddr();
+                    int serverPort = videoServerInfo.getServerport();
+                    requestVideoData(videoServerAddr, serverPort);
+                }
             }
         } finally {
             if (outputStream != null) {

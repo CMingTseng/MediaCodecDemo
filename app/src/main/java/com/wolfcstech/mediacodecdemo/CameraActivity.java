@@ -448,7 +448,7 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
         @Override
         protected Void doInBackground(Void... params) {
 //            mStreamReceiver.requestStreamData("10.240.252.17", 18960);
-            mStreamReceiver.requestStreamData("10.242.24.174", 18960);
+            mStreamReceiver.requestStreamData("10.240.252.17", 18960);
             return null;
         }
 

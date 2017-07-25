@@ -1,0 +1,13 @@
+syntax = "proto2";
+
+package com.wolfcstech.mediacodecdemo;
+
+message VideoServerInfo {
+  required string serveraddr = 1;
+  required uint32 serverport = 2;
+}
+
+message VideoRoleRegistration {
+  required int32 role = 1;
+  required string videoStreamId = 2;
+}
