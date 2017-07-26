@@ -24,12 +24,11 @@ import java.nio.ByteOrder;
 public class TCPStreamReceiver {
     private static final String TAG = "TCPStreamReceiver";
 
-    private static final int MAX_UDP_PACKET_SIZE = 128 * 1024;
+    private static final int MAX_UDP_PACKET_SIZE = 256 * 1024;
 
     private volatile boolean mStop = false;
 
     private byte[] mRecvBuf = new byte[MAX_UDP_PACKET_SIZE];
-    private byte[] mTmpSwapBuf = new byte[MAX_UDP_PACKET_SIZE];
 
     private StreamReceivedListener mDataReceivedListener;
 
@@ -43,7 +42,7 @@ public class TCPStreamReceiver {
         mStop = true;
     }
 
-    private void connectAndRequestVideo(SocketAddress socketAddress) throws IOException {
+    private void connectAndRequestVideo(SocketAddress socketAddress, String deviceId) throws IOException {
         Socket client = null;
         try {
             client = new Socket();
@@ -57,6 +56,7 @@ public class TCPStreamReceiver {
         Controlmsg.VideoRoleRegistration.Builder videoRoleRegistrationBuild = Controlmsg.VideoRoleRegistration.newBuilder();
         videoRoleRegistrationBuild.setRole(Message.VideoRoleConsumer);
         videoRoleRegistrationBuild.setVideoStreamId("1234567890");
+        videoRoleRegistrationBuild.setDeviceId(deviceId);
         Controlmsg.VideoRoleRegistration videoRoleRegistration = videoRoleRegistrationBuild.build();
 
         Message.MessageHdr msgheader = new Message.MessageHdr();
@@ -83,42 +83,31 @@ public class TCPStreamReceiver {
 
         inputStream = client.getInputStream();
 
-        boolean remainBytes = false;
-        int bytesRead = 0;
+
+        byte framelengthbytes[] = new byte[4];
         try {
             while (!mStop) {
-                int readcount = 0;
-                if (!remainBytes) {
-                    readcount = inputStream.read(mRecvBuf, bytesRead, MAX_UDP_PACKET_SIZE - bytesRead);
-                    bytesRead = readcount;
-                }
+                int readcount = inputStream.read(framelengthbytes, 0, 4);
+                if (readcount == 4) {
+                    int framelength = getFrameLength(framelengthbytes, 0);
 
-                int bytesToRead = getFrameLength(mRecvBuf, 0) + 4;
-                if (bytesToRead < 0 || bytesToRead > MAX_UDP_PACKET_SIZE) {
-                    break;
-                }
-                Log.i(TAG, "bytesToRead " + bytesToRead);
+                    Log.i(TAG, "framelength = " + framelength);
+                    if (framelength < 0 || framelength > MAX_UDP_PACKET_SIZE) {
+                        Log.e(TAG, "Frame is too large: " + framelength);
+                        break;
+                    }
+                    int bytesRead = 0;
+                    int bytesToRead = framelength;
+                    while (bytesToRead > bytesRead) {
+                        readcount = inputStream.read(mRecvBuf, bytesRead, bytesToRead - bytesRead);
+                        bytesRead += readcount;
+                    }
 
-                while (bytesRead < bytesToRead) {
-                    readcount = inputStream.read(mRecvBuf, bytesRead, bytesToRead - bytesRead);
-                    bytesRead += readcount;
-                }
-
-                mTotalRecvBytes += bytesToRead - 4;
-                Log.i(TAG, "bytesRead " + bytesRead + " mTotalRecvBytes " + mTotalRecvBytes);
-                if (mDataReceivedListener != null) {
-                    ByteBuffer byteBuffer = ByteBuffer.wrap(mRecvBuf, 4, bytesToRead - 4);
-                    mDataReceivedListener.onDataReceived(byteBuffer);
-
-                    if (bytesRead > bytesToRead) {
-                        System.arraycopy(mRecvBuf, bytesToRead, mTmpSwapBuf, 0, bytesRead - bytesToRead);
-                        System.arraycopy(mTmpSwapBuf, 0, mRecvBuf, 0, bytesRead - bytesToRead);
-
-                        bytesRead = bytesRead - bytesToRead;
-                        remainBytes = true;
-                    } else {
-                        bytesRead = 0;
-                        remainBytes = false;
+                    mTotalRecvBytes += bytesRead;
+                    Log.i(TAG, "bytesRead " + bytesRead + " mTotalRecvBytes " + mTotalRecvBytes);
+                    if (mDataReceivedListener != null) {
+                        ByteBuffer byteBuffer = ByteBuffer.wrap(mRecvBuf, 0, bytesToRead);
+                        mDataReceivedListener.onDataReceived(byteBuffer);
                     }
                 }
             }
@@ -145,7 +134,7 @@ public class TCPStreamReceiver {
         }
     }
 
-    private void requestVideoData(String videoServerAddr, int serverPort) {
+    private void requestVideoData(String videoServerAddr, int serverPort, final String deviceId) {
         try {
             InetAddress addr = InetAddress.getByName(videoServerAddr);
             final SocketAddress socketAddress = new InetSocketAddress(addr, serverPort);
@@ -155,13 +144,14 @@ public class TCPStreamReceiver {
                     while (!mStop) {
                         try {
                             mTotalRecvBytes = 0;
-                            connectAndRequestVideo(socketAddress);
+                            connectAndRequestVideo(socketAddress, deviceId);
                         } catch (IOException e) {
                             e.printStackTrace();
                             if (!recover(e)) {
                                 mStop = true;
                             }
                         }
+                        Log.i(TAG, "Video data request thread over.");
                     }
                 }
             }.start();
@@ -216,9 +206,12 @@ public class TCPStreamReceiver {
                     readcount = inputStream.read(msgRecvBuf, 0, msgheader.message_data_length);
                     ByteArrayInputStream bais = new ByteArrayInputStream(msgRecvBuf, 0, msgheader.message_data_length);
                     Controlmsg.VideoServerInfo videoServerInfo = Controlmsg.VideoServerInfo.parseFrom(bais);
+
                     String videoServerAddr = videoServerInfo.getServeraddr();
                     int serverPort = videoServerInfo.getServerport();
-                    requestVideoData(videoServerAddr, serverPort);
+                    String deviceId = videoServerInfo.getDeviceId();
+
+                    requestVideoData(videoServerAddr, serverPort, deviceId);
                 }
             }
         } finally {
@@ -279,7 +272,6 @@ public class TCPStreamReceiver {
     private int getFrameLength(byte[] data, int offset) {
         ByteBuffer bb = ByteBuffer.wrap(data, offset, 4);
         bb.order(ByteOrder.BIG_ENDIAN);
-        bb.asIntBuffer();
         int frameLength = bb.getInt();
 
         return frameLength;
