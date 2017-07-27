@@ -21,6 +21,7 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
     private SurfaceHolder mHolder;
     private Camera mCamera;
     private byte[] mPreviewBuffer = new byte[1280 * 960 * 3 / 2];
+    private byte[] mPreviewRotationBuffer = new byte[1280 * 960 * 3 / 2];
 
     public CameraPreview(Context context, Camera camera) {
         super(context);
@@ -84,12 +85,36 @@ public class CameraPreview extends SurfaceView implements SurfaceHolder.Callback
         mFrameListener = frameListener;
     }
 
+    private byte[] rotateYUV420Degree90(byte[] data, int imageWidth, int imageHeight) {
+        // Rotate the Y luma
+        int i = 0;
+        for (int x = 0; x < imageWidth; x++) {
+            for (int y = imageHeight - 1; y >= 0; y--) {
+                mPreviewRotationBuffer[i] = data[y * imageWidth + x];
+                i++;
+            }
+        }
+        // Rotate the U and V color components
+        i = imageWidth * imageHeight * 3 / 2 - 1;
+        for (int x = imageWidth - 1; x > 0; x = x - 2) {
+            for (int y = 0; y < imageHeight / 2; y++) {
+                mPreviewRotationBuffer[i] = data[(imageWidth * imageHeight) + (y * imageWidth) + x];
+                i--;
+                mPreviewRotationBuffer[i] = data[(imageWidth * imageHeight) + (y * imageWidth) + (x - 1)];
+                i--;
+            }
+        }
+        return mPreviewRotationBuffer;
+    }
+
     @Override
     public void onPreviewFrame(byte[] data, Camera camera) {
 //        Log.i(TAG, "onPreviewFrame, data length = " + data.length);
         camera.getParameters().getPreviewFormat();
         if (mFrameListener != null) {
-            mFrameListener.onFrame(data, 0, data.length, 0);
+            Camera.Size size = camera.getParameters().getPreviewSize();
+            byte[] previewdata = rotateYUV420Degree90(data, size.width, size.height);
+            mFrameListener.onFrame(previewdata, 0, previewdata.length, 0);
         }
         mCamera.addCallbackBuffer(mPreviewBuffer);
     }

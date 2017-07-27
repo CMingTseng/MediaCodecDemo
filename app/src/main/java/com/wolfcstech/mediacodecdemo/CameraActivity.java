@@ -28,8 +28,8 @@ public class CameraActivity extends Activity implements CameraPreview.FrameListe
 
     private static final String SAMPLE = Environment.getExternalStorageDirectory() + "/screen.mp4";
 
-    static final int OUTPUT_WIDTH = 1280;
-    static final int OUTPUT_HEIGHT = 960;
+    static final int OUTPUT_WIDTH = 960;
+    static final int OUTPUT_HEIGHT = 1280;
 
     String VIDEO_FORMAT = "video/avc";
     int VIDEO_FRAME_PER_SECOND = 30;
